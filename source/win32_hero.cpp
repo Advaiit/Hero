@@ -1,40 +1,69 @@
 //Include the windows header
 #include <Windows.h>
 #include <stdint.h>
+#include <xinput.h>
 
 #define BYTES_PER_PIXEL 4
 #define uint32 uint32_t
 #define uint16 uint16_t
 #define uint8 uint8_t
 
-static bool gRunning = true;
-static BITMAPINFO bitmapInfo;
-static void *bitmapMemory;
-static int bitmapWidth;
-static int bitmapHeight;
-
-static void renderGradient(int XOffset, int YOffset)
+typedef DWORD xinput_get_state(DWORD dwUserIndex, XINPUT_STATE *pState);
+DWORD XInputGetStateStub(DWORD dwUserIndex, XINPUT_STATE *pState)
 {
-	int pitch = bitmapWidth * BYTES_PER_PIXEL;
-	uint8 *row = (uint8 *)bitmapMemory;
+	return 0;
+}
 
-	for (int Y = 0; Y < bitmapHeight; Y++)
+typedef DWORD xinput_set_state(DWORD dwUserIndex, XINPUT_VIBRATION *pVibration);
+DWORD XInputSetStateStub(DWORD dwUserIndex, XINPUT_VIBRATION *pVibration)
+{
+	return 0;
+}
+
+static xinput_get_state *XInputGetState_ = XInputGetStateStub;
+static xinput_set_state *XInputSetState_ = XInputSetStateStub;
+
+#define XInputGetState XInputGetState_
+#define XInputSetState XInputSetState_
+
+static void LoadXInput()
+{
+	HMODULE XInputLibrary = LoadLibrary("xinput1_3.dll");
+
+	if (XInputLibrary)
 	{
-		uint8 *pixel = (uint8 *)row;
+		XInputGetState = (xinput_get_state *)GetProcAddress(XInputLibrary, "XInputGetState");
+		XInputSetState = (xinput_set_state *)GetProcAddress(XInputLibrary, "XInputSetState");
+	}
+}
 
-		for (int X = 0; X < bitmapWidth; X++)
+
+struct	OffScreenBuffer
+{
+	BITMAPINFO bitmapInfo;
+	void *bitmapMemory;
+	int bitmapWidth;
+	int bitmapHeight;
+};
+
+static OffScreenBuffer gOffBuffer;
+static bool gRunning = true;
+
+static void renderGradient(OffScreenBuffer *buffer, int XOffset, int YOffset)
+{
+	int pitch = buffer->bitmapWidth * BYTES_PER_PIXEL;
+	uint8 *row = (uint8 *)buffer->bitmapMemory;
+
+	for (int Y = 0; Y < buffer->bitmapHeight; Y++)
+	{
+		uint32 *pixel = (uint32 *)row;
+
+		for (int X = 0; X < buffer->bitmapWidth; X++)
 		{
-			*pixel = X + XOffset;
-			pixel++;
+			uint8 blue = X + XOffset;
+			uint8 green = Y + YOffset;
 
-			*pixel = Y + YOffset;
-			pixel++;
-
-			*pixel = 0;
-			pixel++;
-
-			*pixel = 0;
-			pixel++;
+			*pixel++ = green << 8 | blue;
 		}
 
 		row += pitch;
@@ -42,40 +71,38 @@ static void renderGradient(int XOffset, int YOffset)
 }
 
 //Devive Independent Bitmap
-static void ResizeDIBSection(int width, int height)
+static void ResizeDIBSection(OffScreenBuffer *buffer, int width, int height)
 {
-	if (bitmapMemory)
+	if (buffer->bitmapMemory)
 	{
-		VirtualFree(bitmapMemory, 0, MEM_RELEASE);
+		VirtualFree(buffer->bitmapMemory, 0, MEM_RELEASE);
 	}
 
-	bitmapWidth = width;
-	bitmapHeight = height;
+	buffer->bitmapWidth = width;
+	buffer->bitmapHeight = height;
 
-	bitmapInfo.bmiHeader.biSize = sizeof(bitmapInfo.bmiHeader);
-	bitmapInfo.bmiHeader.biWidth = bitmapWidth;
-	bitmapInfo.bmiHeader.biHeight = -bitmapHeight;
-	bitmapInfo.bmiHeader.biPlanes = 1;
-	bitmapInfo.bmiHeader.biBitCount = 32;
-	bitmapInfo.bmiHeader.biCompression = BI_RGB;
+	buffer->bitmapInfo.bmiHeader.biSize = sizeof(buffer->bitmapInfo.bmiHeader);
+	buffer->bitmapInfo.bmiHeader.biWidth = buffer->bitmapWidth;
+	buffer->bitmapInfo.bmiHeader.biHeight = -(buffer->bitmapHeight);
+	buffer->bitmapInfo.bmiHeader.biPlanes = 1;
+	buffer->bitmapInfo.bmiHeader.biBitCount = 32;
+	buffer->bitmapInfo.bmiHeader.biCompression = BI_RGB;
 
-	bitmapMemory = VirtualAlloc(0, (bitmapWidth * bitmapHeight) * BYTES_PER_PIXEL, MEM_COMMIT, PAGE_READWRITE);
+	buffer->bitmapMemory = VirtualAlloc(0, (buffer->bitmapWidth * buffer->bitmapHeight) * BYTES_PER_PIXEL, MEM_COMMIT, PAGE_READWRITE);
 
 	return;
 }
 
-static void RefreshWindow(HDC deviceContext, RECT *windowRect, int x, int y, int width, int height)
+static void RefreshWindow(HDC deviceContext, RECT *windowRect, OffScreenBuffer *buffer, int x, int y, int width, int height)
 {
 	int windowWidth = windowRect->right - windowRect->left;
 	int windowHeight = windowRect->bottom - windowRect->top;
 
 	StretchDIBits(deviceContext,
-		//x, y, width, height,
-		//x, y, width, height,
-		0, 0, bitmapWidth, bitmapHeight,
 		0, 0, windowWidth, windowHeight,
-		bitmapMemory,
-		&bitmapInfo, 
+		0, 0, buffer->bitmapWidth, buffer->bitmapHeight,
+		buffer->bitmapMemory,
+		&(buffer->bitmapInfo),
 		DIB_RGB_COLORS, 
 		SRCCOPY);
 
@@ -95,11 +122,6 @@ MainWindowProc(HWND   window,
 	{
 		case WM_SIZE:
 		{
-			RECT ClientRect;
-			GetClientRect(window, &ClientRect);
-			int width = ClientRect.right - ClientRect.left;
-			int height = ClientRect.bottom - ClientRect.top;
-			ResizeDIBSection(width, height);
 			OutputDebugString("WM_SIZE\n");
 		}break;
 		case WM_QUIT:
@@ -110,6 +132,77 @@ MainWindowProc(HWND   window,
 		case WM_DESTROY:
 		{
 			OutputDebugStringA("WM_DESTROY\n");
+		}break;
+		case WM_SYSKEYDOWN:
+		case WM_SYSKEYUP:
+		case WM_KEYDOWN:
+		case WM_KEYUP:
+		{
+			uint32 VKCode = wParam;
+
+			bool wasDown = ((lParam & (1 << 30)) != 0);
+			bool isDown = ((lParam & (1 << 31)) == 0);
+
+			if (wasDown != isDown)
+			{
+				if (VKCode == 'W')
+				{
+
+				}
+				else if (VKCode == 'A')
+				{
+
+				}
+				else if (VKCode == 'S')
+				{
+
+				}
+				else if (VKCode == 'D')
+				{
+
+				}
+				else if (VKCode == 'Q')
+				{
+
+				}
+				else if (VKCode == 'E')
+				{
+
+				}
+				else if (VKCode == VK_UP)
+				{
+
+				}
+				else if (VKCode == VK_LEFT)
+				{
+
+				}
+				else if (VKCode == VK_RIGHT)
+				{
+
+				}
+				else if (VKCode == VK_ESCAPE)
+				{
+					OutputDebugString("ESCAPE: ");
+
+					if (isDown)
+					{
+						OutputDebugString("isDown ");
+					}
+
+					if (wasDown)
+					{
+						OutputDebugString("wasDown");
+					}
+
+					OutputDebugString("\n");
+
+				}
+				else if (VKCode == VK_SPACE)
+				{
+
+				}
+			}
 		}break;
 		case WM_CLOSE:
 		{
@@ -133,7 +226,7 @@ MainWindowProc(HWND   window,
 			int width = lpPaint.rcPaint.right - lpPaint.rcPaint.left;
 			int height = lpPaint.rcPaint.bottom - lpPaint.rcPaint.top;
 
-			RefreshWindow(context, &ClientRect, X, Y, width, height);
+			RefreshWindow(context, &ClientRect, &gOffBuffer, X, Y, width, height);
 
 			//PatBlt(context, X, Y, width, height, operation);
 
@@ -173,6 +266,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	wnd.lpfnWndProc = MainWindowProc;
 	wnd.hInstance = hInstance;
 	wnd.lpszClassName = "HandMadeHeroWindowClass";
+
+	LoadXInput();
+
+	ResizeDIBSection(&gOffBuffer, 1280, 720);
 
 	//Register window class
 	if (RegisterClass(&wnd))
@@ -220,14 +317,51 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 				DispatchMessage(&msg);
 			}
 
-			renderGradient(XOffset, YOffset);
+			for (int i = 0; i < XUSER_MAX_COUNT; i++)
+			{
+				XINPUT_STATE controllerState;
+
+				if (XInputGetState(i, &controllerState) == ERROR_SUCCESS)
+				{
+					//The controller state is plugged in
+
+					XINPUT_GAMEPAD *gamepad = &(controllerState.Gamepad);
+
+					bool up = (gamepad->wButtons & XINPUT_GAMEPAD_DPAD_UP);
+					bool down = (gamepad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN);
+					bool left = (gamepad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT);
+					bool right = (gamepad->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT);
+					bool start = (gamepad->wButtons & XINPUT_GAMEPAD_START);
+					bool back = (gamepad->wButtons & XINPUT_GAMEPAD_BACK);
+					bool leftShoulder = (gamepad->wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER);
+					bool rightShoulder = (gamepad->wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER);
+					bool AButton = (gamepad->wButtons & XINPUT_GAMEPAD_A);
+					bool BButton = (gamepad->wButtons & XINPUT_GAMEPAD_B);
+					bool XButton = (gamepad->wButtons & XINPUT_GAMEPAD_X);
+					bool YButton = (gamepad->wButtons & XINPUT_GAMEPAD_Y);
+
+					INT16 StickX = gamepad->sThumbLX;
+					INT16 StickY = gamepad->sThumbLY;
+
+					if (AButton)
+					{
+						YOffset += 2;
+					}
+				}
+				else
+				{
+					//The controller is not available
+				}
+			}
+
+			renderGradient(&gOffBuffer, XOffset, YOffset);
 
 			RECT ClientRect;
 			GetClientRect(hWnd, &ClientRect);
 
 			HDC context = GetDC(hWnd);
 
-			RefreshWindow(context, &ClientRect, 0, 0, bitmapWidth, bitmapHeight);
+			RefreshWindow(context, &ClientRect, &gOffBuffer, 0, 0, gOffBuffer.bitmapWidth, gOffBuffer.bitmapHeight);
 			
 			ReleaseDC(hWnd, context);
 
