@@ -2,23 +2,31 @@
 #include <Windows.h>
 #include <stdint.h>
 #include <xinput.h>
+#include <dsound.h>
 
 #define BYTES_PER_PIXEL 4
+#define AUDIO_SAMPLE_PER_SEC 48000
+#define AUDIO_BUFFER_SIZE 48000 * sizeof(INT16) * 2
+
 #define uint32 uint32_t
 #define uint16 uint16_t
 #define uint8 uint8_t
 
+static LPDIRECTSOUNDBUFFER secondaryBuffer;
+
 typedef DWORD xinput_get_state(DWORD dwUserIndex, XINPUT_STATE *pState);
 DWORD XInputGetStateStub(DWORD dwUserIndex, XINPUT_STATE *pState)
 {
-	return 0;
+	return ERROR_DEVICE_NOT_CONNECTED;
 }
 
 typedef DWORD xinput_set_state(DWORD dwUserIndex, XINPUT_VIBRATION *pVibration);
 DWORD XInputSetStateStub(DWORD dwUserIndex, XINPUT_VIBRATION *pVibration)
 {
-	return 0;
+	return ERROR_DEVICE_NOT_CONNECTED;
 }
+
+typedef HRESULT WINAPI direct_sound_create(LPCGUID pcGuidDevice, LPDIRECTSOUND *ppDS, LPUNKNOWN pUnkOuter);
 
 static xinput_get_state *XInputGetState_ = XInputGetStateStub;
 static xinput_set_state *XInputSetState_ = XInputSetStateStub;
@@ -34,6 +42,73 @@ static void LoadXInput()
 	{
 		XInputGetState = (xinput_get_state *)GetProcAddress(XInputLibrary, "XInputGetState");
 		XInputSetState = (xinput_set_state *)GetProcAddress(XInputLibrary, "XInputSetState");
+	}
+}
+
+static void InitSound(HWND Window)
+{
+	HMODULE DSoundLibrary = LoadLibrary("dsound.dll");
+
+	if (DSoundLibrary)
+	{
+		direct_sound_create *DirectSoundCreate = (direct_sound_create *)GetProcAddress(DSoundLibrary, "DirectSoundCreate");
+		LPDIRECTSOUND pDirectSound;
+		WAVEFORMATEX waveFormat = {};
+
+		waveFormat.wFormatTag = WAVE_FORMAT_PCM;
+		waveFormat.nChannels = 2;
+		waveFormat.nSamplesPerSec = AUDIO_SAMPLE_PER_SEC;
+		waveFormat.wBitsPerSample = 16;
+		waveFormat.nBlockAlign = (waveFormat.nChannels * waveFormat.wBitsPerSample) / 8;
+		waveFormat.nAvgBytesPerSec = waveFormat.nSamplesPerSec * waveFormat.nBlockAlign;
+		waveFormat.cbSize = 0;
+
+		if (DirectSoundCreate && SUCCEEDED(DirectSoundCreate(0, &pDirectSound, 0)))
+		{
+			if (SUCCEEDED(pDirectSound->SetCooperativeLevel(Window, DSSCL_PRIORITY)))
+			{
+				DSBUFFERDESC primaryBufferDescription = {};
+				LPDIRECTSOUNDBUFFER primaryBuffer;
+
+				primaryBufferDescription.dwFlags = DSBCAPS_PRIMARYBUFFER;
+				primaryBufferDescription.dwSize = sizeof(primaryBufferDescription);
+
+				if (SUCCEEDED(pDirectSound->CreateSoundBuffer(&primaryBufferDescription, &primaryBuffer, 0)))
+				{
+					if (SUCCEEDED(primaryBuffer->SetFormat(&waveFormat)))
+					{
+						OutputDebugString("Format Set");
+					}
+					else
+					{
+
+					}
+				}
+				else
+				{
+
+				}
+			}
+			else
+			{
+
+			}
+		}
+		else
+		{
+
+		}
+
+		DSBUFFERDESC bufferDescription = {};
+		bufferDescription.dwSize = sizeof(bufferDescription);
+		bufferDescription.dwFlags = 0;
+		bufferDescription.dwBufferBytes = AUDIO_BUFFER_SIZE;
+		bufferDescription.lpwfxFormat = &waveFormat;
+
+		if (SUCCEEDED(pDirectSound->CreateSoundBuffer(&bufferDescription, &secondaryBuffer, NULL)))
+		{
+
+		}
 	}
 }
 
@@ -203,6 +278,11 @@ MainWindowProc(HWND   window,
 
 				}
 			}
+			
+			if (VKCode == VK_F4 && (lParam & (1 << 29)))
+			{
+				gRunning = false;
+			}
 		}break;
 		case WM_CLOSE:
 		{
@@ -301,6 +381,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 		//Show the window
 		ShowWindow(hWnd, nCmdShow);
 
+		InitSound(hWnd);
+
 		//Main message loop
 		MSG msg;
 		int XOffset = 0;
@@ -343,10 +425,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 					INT16 StickX = gamepad->sThumbLX;
 					INT16 StickY = gamepad->sThumbLY;
 
-					if (AButton)
-					{
-						YOffset += 2;
-					}
+					XOffset += StickX >> 12;
+					YOffset += StickY >> 12;
 				}
 				else
 				{
