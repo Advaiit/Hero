@@ -6,7 +6,8 @@
 
 #define BYTES_PER_PIXEL 4
 #define AUDIO_SAMPLE_PER_SEC 48000
-#define AUDIO_BUFFER_SIZE 48000 * sizeof(INT16) * 2
+#define BYTES_PER_SAMPLE (sizeof(INT16) * 2) 
+#define AUDIO_BUFFER_SIZE (AUDIO_SAMPLE_PER_SEC * BYTES_PER_SAMPLE)
 
 #define uint32 uint32_t
 #define uint16 uint16_t
@@ -383,10 +384,21 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 		InitSound(hWnd);
 
+		if (FAILED(secondaryBuffer->Play(0, 0, DSBPLAY_LOOPING)))
+		{
+
+		}
+
 		//Main message loop
 		MSG msg;
 		int XOffset = 0;
 		int YOffset = 0;
+		int Hertz = 256;
+		uint32 runningSampleIndex = 0;
+		int SquareWaveCounter = 0;
+		int SquareWavePeriod = AUDIO_SAMPLE_PER_SEC / Hertz;
+		int halfSquareWavePeriod = SquareWavePeriod / 2;
+		int volume = 4000;
 
 		while (gRunning) {
 			while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
@@ -435,6 +447,63 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 			}
 
 			renderGradient(&gOffBuffer, XOffset, YOffset);
+
+			//DirectSound output test
+
+			DWORD playCursor = 0;
+			DWORD writeCursor = 0;
+
+			if (SUCCEEDED(secondaryBuffer->GetCurrentPosition(&playCursor, &writeCursor)))
+			{
+				DWORD byteToLock = runningSampleIndex * BYTES_PER_SAMPLE % AUDIO_BUFFER_SIZE;
+				DWORD writePointer = 0;
+				DWORD bytesToWrite = 0;
+
+				void *region1;
+				DWORD region1Size;
+				void *region2;
+				DWORD region2Size;
+
+				if (byteToLock > playCursor)
+				{
+					bytesToWrite = AUDIO_BUFFER_SIZE - byteToLock;
+					bytesToWrite += playCursor;
+				}
+				else
+				{
+					bytesToWrite = playCursor - byteToLock;
+				}
+
+				if (SUCCEEDED(secondaryBuffer->Lock(byteToLock, bytesToWrite, &region1, &region1Size, &region2, &region2Size, 0)))
+				{
+					//todo: assert region1/2Size is valid
+
+					INT16 *sampleOut = (INT16 *)region1;
+					DWORD region1SampleCount = region1Size / BYTES_PER_SAMPLE;
+					DWORD region2SampleCount = region2Size / BYTES_PER_SAMPLE;
+
+					for (int i = 0; i < region1SampleCount; i++)
+					{
+						INT16 SampleValue = ((runningSampleIndex++ / halfSquareWavePeriod) % 2) ? volume : -volume;
+						*sampleOut++ = SampleValue;
+						*sampleOut = SampleValue;
+					}
+
+					sampleOut = (INT16 *)region2;
+
+					for (int i = 0; i < region2SampleCount; i++)
+					{
+						INT16 SampleValue = ((runningSampleIndex++ / halfSquareWavePeriod) % 2) ? volume : -volume;
+						*sampleOut++ = SampleValue;
+						*sampleOut = SampleValue;
+					}
+
+					if (FAILED(secondaryBuffer->Unlock(region1, region1Size, region2, region2Size)))
+					{
+						//todo: handle here
+					}
+				}
+			}
 
 			RECT ClientRect;
 			GetClientRect(hWnd, &ClientRect);
