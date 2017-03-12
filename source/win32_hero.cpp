@@ -455,6 +455,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 		int XOffset = 0;
 		int YOffset = 0;
 		SoundData_ soundData = {};
+		LARGE_INTEGER performacnceFrequency;
+		LARGE_INTEGER startCounter;
+		INT64 startCycle = 0;
 
 		soundData.Hertz = 256;
 		soundData.WavePeriod = AUDIO_SAMPLE_PER_SEC / soundData.Hertz;
@@ -462,7 +465,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 		soundData.volume = 4000;
 		soundData.soundPlaying = false;
 
+		QueryPerformanceFrequency(&performacnceFrequency);
+		QueryPerformanceCounter(&startCounter);
+
+		startCycle = __rdtsc();
+
 		while (gRunning) {
+
 			while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
 			{
 				if(msg.message == WM_QUIT)
@@ -552,6 +561,20 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 			ReleaseDC(hWnd, context);
 
 			XOffset++;
+			LARGE_INTEGER endCounter;
+			INT64 endCycle = __rdtsc();
+			QueryPerformanceCounter(&endCounter);
+			INT64 elapsedCycles = endCycle - startCycle;
+			INT64 counterDifference = endCounter.QuadPart - startCounter.QuadPart;
+			INT64 timeElapsed = (1000 * counterDifference / performacnceFrequency.QuadPart);
+			INT64 framesPerSecond = performacnceFrequency.QuadPart / counterDifference;
+			INT64 millionCyclesEPF = elapsedCycles / (1000 * 1000);
+			char stringBuffer[512];
+			wsprintf(stringBuffer, "\nTime Elapsed is: %ldms/f FPS: %ldf/s MillionCyclesElapsedPerFrame: %dmc/f\n", timeElapsed, framesPerSecond, millionCyclesEPF);
+			OutputDebugString(stringBuffer);
+			
+			startCounter = endCounter;
+			startCycle = endCycle;
 		}
 	}
 
