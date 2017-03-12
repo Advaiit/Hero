@@ -3,11 +3,13 @@
 #include <stdint.h>
 #include <xinput.h>
 #include <dsound.h>
+#include <math.h>
 
 #define BYTES_PER_PIXEL 4
 #define AUDIO_SAMPLE_PER_SEC 48000
 #define BYTES_PER_SAMPLE (sizeof(INT16) * 2) 
 #define AUDIO_BUFFER_SIZE (AUDIO_SAMPLE_PER_SEC * BYTES_PER_SAMPLE)
+#define PI 3.14159265359
 
 #define uint32 uint32_t
 #define uint16 uint16_t
@@ -34,6 +36,17 @@ static xinput_set_state *XInputSetState_ = XInputSetStateStub;
 
 #define XInputGetState XInputGetState_
 #define XInputSetState XInputSetState_
+
+struct SoundData_
+{
+	int Hertz = 256;
+	uint32 runningSampleIndex = 0;
+	int WaveCounter = 0;
+	int WavePeriod = AUDIO_SAMPLE_PER_SEC / Hertz;
+	int halfWavePeriod = WavePeriod / 2;
+	int volume = 4000;
+	int soundPlaying = false;
+};
 
 static void LoadXInput()
 {
@@ -109,6 +122,59 @@ static void InitSound(HWND Window)
 		if (SUCCEEDED(pDirectSound->CreateSoundBuffer(&bufferDescription, &secondaryBuffer, NULL)))
 		{
 
+		}
+	}
+}
+
+void FillSoundBuffer(DWORD byteToLock, DWORD bytesToWrite, SoundData_ *pSoundData)
+{
+	void *region1 = NULL;
+	DWORD region1Size = 0;
+	void *region2 = NULL;
+	DWORD region2Size = 0;
+
+	if (SUCCEEDED(secondaryBuffer->Lock(byteToLock, bytesToWrite, &region1, &region1Size, &region2, &region2Size, 0)))
+	{
+		//todo: assert region1/2Size is valid
+		DWORD region1SampleCount = region1Size / BYTES_PER_SAMPLE;
+		DWORD region2SampleCount = region2Size / BYTES_PER_SAMPLE;
+		INT16 *sampleOut = (INT16 *)region1;
+
+		for (int i = 0; i < region1SampleCount; i++)
+		{
+			float t = 2.0f * PI * (float)pSoundData->runningSampleIndex++ / (float)pSoundData->WavePeriod;
+			float sineValue = sinf(t);
+			INT16 SampleValue = (INT16)(sineValue * pSoundData->volume);
+			*sampleOut++ = SampleValue;
+			*sampleOut++ = SampleValue;
+		}
+
+		sampleOut = (INT16 *)region2;
+
+		for (int i = 0; i < region2SampleCount; i++)
+		{
+			float t = 2.0f * PI * (float)pSoundData->runningSampleIndex++ / (float)pSoundData->WavePeriod;
+			float sineValue = sinf(t);
+			INT16 SampleValue = (INT16)(sineValue * pSoundData->volume);
+			*sampleOut++ = SampleValue;
+			*sampleOut++ = SampleValue;
+		}
+
+		if (!(pSoundData->soundPlaying))
+		{
+			if (FAILED(secondaryBuffer->Play(0, 0, DSBPLAY_LOOPING)))
+			{
+
+			}
+			else
+			{
+				pSoundData->soundPlaying = true;
+			}
+		}
+
+		if (FAILED(secondaryBuffer->Unlock(region1, region1Size, region2, region2Size)))
+		{
+			//todo: handle here
 		}
 	}
 }
@@ -384,21 +450,17 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 		InitSound(hWnd);
 
-		if (FAILED(secondaryBuffer->Play(0, 0, DSBPLAY_LOOPING)))
-		{
-
-		}
-
 		//Main message loop
 		MSG msg;
 		int XOffset = 0;
 		int YOffset = 0;
-		int Hertz = 256;
-		uint32 runningSampleIndex = 0;
-		int SquareWaveCounter = 0;
-		int SquareWavePeriod = AUDIO_SAMPLE_PER_SEC / Hertz;
-		int halfSquareWavePeriod = SquareWavePeriod / 2;
-		int volume = 4000;
+		SoundData_ soundData = {};
+
+		soundData.Hertz = 256;
+		soundData.WavePeriod = AUDIO_SAMPLE_PER_SEC / soundData.Hertz;
+		soundData.halfWavePeriod = soundData.WavePeriod / 2;
+		soundData.volume = 4000;
+		soundData.soundPlaying = false;
 
 		while (gRunning) {
 			while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
@@ -455,16 +517,18 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 			if (SUCCEEDED(secondaryBuffer->GetCurrentPosition(&playCursor, &writeCursor)))
 			{
-				DWORD byteToLock = runningSampleIndex * BYTES_PER_SAMPLE % AUDIO_BUFFER_SIZE;
+				DWORD byteToLock = soundData.runningSampleIndex * BYTES_PER_SAMPLE % AUDIO_BUFFER_SIZE;
 				DWORD writePointer = 0;
 				DWORD bytesToWrite = 0;
 
-				void *region1;
-				DWORD region1Size;
-				void *region2;
-				DWORD region2Size;
-
-				if (byteToLock > playCursor)
+				if (byteToLock == playCursor)
+				{
+					if (!(soundData.soundPlaying))
+					{
+						bytesToWrite = AUDIO_BUFFER_SIZE;
+					}
+				}
+				else if (byteToLock > playCursor)
 				{
 					bytesToWrite = AUDIO_BUFFER_SIZE - byteToLock;
 					bytesToWrite += playCursor;
@@ -474,35 +538,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 					bytesToWrite = playCursor - byteToLock;
 				}
 
-				if (SUCCEEDED(secondaryBuffer->Lock(byteToLock, bytesToWrite, &region1, &region1Size, &region2, &region2Size, 0)))
-				{
-					//todo: assert region1/2Size is valid
+				FillSoundBuffer(byteToLock, bytesToWrite, &soundData);
 
-					INT16 *sampleOut = (INT16 *)region1;
-					DWORD region1SampleCount = region1Size / BYTES_PER_SAMPLE;
-					DWORD region2SampleCount = region2Size / BYTES_PER_SAMPLE;
-
-					for (int i = 0; i < region1SampleCount; i++)
-					{
-						INT16 SampleValue = ((runningSampleIndex++ / halfSquareWavePeriod) % 2) ? volume : -volume;
-						*sampleOut++ = SampleValue;
-						*sampleOut = SampleValue;
-					}
-
-					sampleOut = (INT16 *)region2;
-
-					for (int i = 0; i < region2SampleCount; i++)
-					{
-						INT16 SampleValue = ((runningSampleIndex++ / halfSquareWavePeriod) % 2) ? volume : -volume;
-						*sampleOut++ = SampleValue;
-						*sampleOut = SampleValue;
-					}
-
-					if (FAILED(secondaryBuffer->Unlock(region1, region1Size, region2, region2Size)))
-					{
-						//todo: handle here
-					}
-				}
 			}
 
 			RECT ClientRect;
