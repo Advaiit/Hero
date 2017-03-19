@@ -4,16 +4,7 @@
 #include <xinput.h>
 #include <dsound.h>
 #include <math.h>
-
-#define BYTES_PER_PIXEL 4
-#define AUDIO_SAMPLE_PER_SEC 48000
-#define BYTES_PER_SAMPLE (sizeof(INT16) * 2) 
-#define AUDIO_BUFFER_SIZE (AUDIO_SAMPLE_PER_SEC * BYTES_PER_SAMPLE)
-#define PI 3.14159265359
-
-#define uint32 uint32_t
-#define uint16 uint16_t
-#define uint8 uint8_t
+#include "./hero.cpp"
 
 static LPDIRECTSOUNDBUFFER secondaryBuffer;
 
@@ -180,7 +171,7 @@ void FillSoundBuffer(DWORD byteToLock, DWORD bytesToWrite, SoundData_ *pSoundDat
 }
 
 
-struct	OffScreenBuffer
+struct	Win32OffScreenBuffer
 {
 	BITMAPINFO bitmapInfo;
 	void *bitmapMemory;
@@ -188,32 +179,11 @@ struct	OffScreenBuffer
 	int bitmapHeight;
 };
 
-static OffScreenBuffer gOffBuffer;
+static Win32OffScreenBuffer gOffBuffer;
 static bool gRunning = true;
 
-static void renderGradient(OffScreenBuffer *buffer, int XOffset, int YOffset)
-{
-	int pitch = buffer->bitmapWidth * BYTES_PER_PIXEL;
-	uint8 *row = (uint8 *)buffer->bitmapMemory;
-
-	for (int Y = 0; Y < buffer->bitmapHeight; Y++)
-	{
-		uint32 *pixel = (uint32 *)row;
-
-		for (int X = 0; X < buffer->bitmapWidth; X++)
-		{
-			uint8 blue = X + XOffset;
-			uint8 green = Y + YOffset;
-
-			*pixel++ = green << 8 | blue;
-		}
-
-		row += pitch;
-	}
-}
-
 //Devive Independent Bitmap
-static void ResizeDIBSection(OffScreenBuffer *buffer, int width, int height)
+static void ResizeDIBSection(Win32OffScreenBuffer *buffer, int width, int height)
 {
 	if (buffer->bitmapMemory)
 	{
@@ -235,7 +205,7 @@ static void ResizeDIBSection(OffScreenBuffer *buffer, int width, int height)
 	return;
 }
 
-static void RefreshWindow(HDC deviceContext, RECT *windowRect, OffScreenBuffer *buffer, int x, int y, int width, int height)
+static void RefreshWindow(HDC deviceContext, RECT *windowRect, Win32OffScreenBuffer *buffer, int x, int y, int width, int height)
 {
 	int windowWidth = windowRect->right - windowRect->left;
 	int windowHeight = windowRect->bottom - windowRect->top;
@@ -517,7 +487,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 				}
 			}
 
-			renderGradient(&gOffBuffer, XOffset, YOffset);
+			GameUpdateAndRender((GameOffScreenBuffer *)&gOffBuffer, XOffset, YOffset);
 
 			//DirectSound output test
 
