@@ -28,17 +28,6 @@ static xinput_set_state *XInputSetState_ = XInputSetStateStub;
 #define XInputGetState XInputGetState_
 #define XInputSetState XInputSetState_
 
-struct SoundData_
-{
-	int Hertz = 256;
-	uint32 runningSampleIndex = 0;
-	int WaveCounter = 0;
-	int WavePeriod = AUDIO_SAMPLE_PER_SEC / Hertz;
-	int halfWavePeriod = WavePeriod / 2;
-	int volume = 4000;
-	int soundPlaying = false;
-};
-
 static void LoadXInput()
 {
 	HMODULE XInputLibrary = LoadLibrary("xinput1_3.dll");
@@ -117,7 +106,7 @@ static void InitSound(HWND Window)
 	}
 }
 
-void FillSoundBuffer(DWORD byteToLock, DWORD bytesToWrite, SoundData_ *pSoundData)
+void FillSoundBuffer(DWORD byteToLock, DWORD bytesToWrite, GameOutputSoundBuffer *pSoundBuffer)
 {
 	void *region1 = NULL;
 	DWORD region1Size = 0;
@@ -130,28 +119,25 @@ void FillSoundBuffer(DWORD byteToLock, DWORD bytesToWrite, SoundData_ *pSoundDat
 		DWORD region1SampleCount = region1Size / BYTES_PER_SAMPLE;
 		DWORD region2SampleCount = region2Size / BYTES_PER_SAMPLE;
 		INT16 *sampleOut = (INT16 *)region1;
+		INT16 *samples = (INT16 *)pSoundBuffer->samples;
 
 		for (int i = 0; i < region1SampleCount; i++)
 		{
-			float t = 2.0f * PI * (float)pSoundData->runningSampleIndex++ / (float)pSoundData->WavePeriod;
-			float sineValue = sinf(t);
-			INT16 SampleValue = (INT16)(sineValue * pSoundData->volume);
-			*sampleOut++ = SampleValue;
-			*sampleOut++ = SampleValue;
+			*sampleOut++ = *(samples++);
+			*sampleOut++ = *(samples++);
+//			pSoundBuffer->soundData.runningSampleIndex ++;
 		}
 
 		sampleOut = (INT16 *)region2;
 
 		for (int i = 0; i < region2SampleCount; i++)
 		{
-			float t = 2.0f * PI * (float)pSoundData->runningSampleIndex++ / (float)pSoundData->WavePeriod;
-			float sineValue = sinf(t);
-			INT16 SampleValue = (INT16)(sineValue * pSoundData->volume);
-			*sampleOut++ = SampleValue;
-			*sampleOut++ = SampleValue;
+			*sampleOut++ = *(samples++);
+			*sampleOut++ = *(samples++);
+//			pSoundBuffer->soundData.runningSampleIndex++;
 		}
 
-		if (!(pSoundData->soundPlaying))
+		if (!(pSoundBuffer->soundData.soundPlaying))
 		{
 			if (FAILED(secondaryBuffer->Play(0, 0, DSBPLAY_LOOPING)))
 			{
@@ -159,7 +145,7 @@ void FillSoundBuffer(DWORD byteToLock, DWORD bytesToWrite, SoundData_ *pSoundDat
 			}
 			else
 			{
-				pSoundData->soundPlaying = true;
+				pSoundBuffer->soundData.soundPlaying = true;
 			}
 		}
 
@@ -169,7 +155,6 @@ void FillSoundBuffer(DWORD byteToLock, DWORD bytesToWrite, SoundData_ *pSoundDat
 		}
 	}
 }
-
 
 struct	Win32OffScreenBuffer
 {
@@ -432,7 +417,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 		soundData.Hertz = 256;
 		soundData.WavePeriod = AUDIO_SAMPLE_PER_SEC / soundData.Hertz;
 		soundData.halfWavePeriod = soundData.WavePeriod / 2;
-		soundData.volume = 4000;
+		soundData.volume = 3000;
 		soundData.soundPlaying = false;
 
 		QueryPerformanceFrequency(&performacnceFrequency);
@@ -487,8 +472,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 				}
 			}
 
-			GameUpdateAndRender((GameOffScreenBuffer *)&gOffBuffer, XOffset, YOffset);
-
 			//DirectSound output test
 
 			DWORD playCursor = 0;
@@ -517,7 +500,15 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 					bytesToWrite = playCursor - byteToLock;
 				}
 
-				FillSoundBuffer(byteToLock, bytesToWrite, &soundData);
+				GameOutputSoundBuffer gameOutputSoundBuffer = {};
+				INT16 samples[48000 * 2];
+				gameOutputSoundBuffer.sampleCount = bytesToWrite / BYTES_PER_SAMPLE;
+				gameOutputSoundBuffer.soundData = soundData;
+				gameOutputSoundBuffer.samples = samples;
+
+				GameUpdateAndRender((GameOffScreenBuffer *)&gOffBuffer, XOffset, YOffset, &gameOutputSoundBuffer);
+
+				FillSoundBuffer(byteToLock, bytesToWrite, &gameOutputSoundBuffer);
 
 			}
 

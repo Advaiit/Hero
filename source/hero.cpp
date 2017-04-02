@@ -1,5 +1,33 @@
 #include "./hero.h"
 
+static void GameOutputSound(GameOutputSoundBuffer *buffer)
+{
+	if (buffer)
+	{
+		INT16 *sampleOut = (INT16 *)buffer->samples;
+
+		if (sampleOut)
+		{
+			for (int i = 0; i < buffer->sampleCount; i++)
+			{
+				float t = 2.0f * PI * buffer->soundData.runningSampleIndex++ / (float)buffer->soundData.WavePeriod;
+				float sineValue = sinf(t);
+				INT16 SampleValue = (INT16)(sineValue * buffer->soundData.volume);
+				*sampleOut++ = SampleValue;
+				*sampleOut++ = SampleValue;
+			}
+		}
+		else
+		{
+			//TODO: Handle this
+		}
+	}
+	else
+	{
+		//TODO: Handle this
+	}
+}
+
 static void renderGradient(GameOffScreenBuffer *buffer, int XOffset, int YOffset)
 {
 	int pitch = buffer->bitmapWidth * BYTES_PER_PIXEL;
@@ -21,7 +49,8 @@ static void renderGradient(GameOffScreenBuffer *buffer, int XOffset, int YOffset
 	}
 }
 
-void GameUpdateAndRender(GameOffScreenBuffer *gameBuffer, int xoffset, int yoffset)
+void GameUpdateAndRender(GameOffScreenBuffer *gameBuffer, int xoffset, int yoffset, GameOutputSoundBuffer *soundBuffer)
 {
 	renderGradient(gameBuffer, xoffset, yoffset);
+	GameOutputSound(soundBuffer);
 }

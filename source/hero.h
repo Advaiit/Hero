@@ -19,4 +19,22 @@ struct	GameOffScreenBuffer
 	int bitmapHeight;
 };
 
-void GameUpdateAndRender(GameOffScreenBuffer *gameBuffer, int xoffset, int yoffset);
+struct SoundData_
+{
+	int Hertz = 256;
+	uint32 runningSampleIndex = 0;
+	int WaveCounter = 0;
+	int WavePeriod = AUDIO_SAMPLE_PER_SEC / Hertz;
+	int halfWavePeriod = WavePeriod / 2;
+	int volume = 4000;
+	int soundPlaying = false;
+};
+
+struct GameOutputSoundBuffer
+{
+	SoundData_ soundData;
+	INT16 *samples;
+	int sampleCount;
+};
+
+void GameUpdateAndRender(GameOffScreenBuffer *gameBuffer, int xoffset, int yoffset, GameOutputSoundBuffer *soundBuffer);
