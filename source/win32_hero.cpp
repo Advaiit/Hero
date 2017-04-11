@@ -8,6 +8,14 @@
 
 static LPDIRECTSOUNDBUFFER secondaryBuffer;
 
+///@todo: move to common
+void GSwap(void *ptr1, void *ptr2)
+{
+	void *temp = ptr1;
+	ptr1 = ptr2;
+	ptr2 = temp;
+}
+
 typedef DWORD xinput_get_state(DWORD dwUserIndex, XINPUT_STATE *pState);
 DWORD XInputGetStateStub(DWORD dwUserIndex, XINPUT_STATE *pState)
 {
@@ -27,6 +35,12 @@ static xinput_set_state *XInputSetState_ = XInputSetStateStub;
 
 #define XInputGetState XInputGetState_
 #define XInputSetState XInputSetState_
+
+static void ProcessXInputDigitalButton(GameButtonState *newState, GameButtonState *oldState, DWORD buttonBit, DWORD xinputButtonState)
+{
+	newState->endedDown = xinputButtonState && buttonBit;
+	newState->isHalfTransition = newState->endedDown != oldState->endedDown;
+}
 
 static void LoadXInput()
 {
@@ -373,6 +387,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	ResizeDIBSection(&gOffBuffer, 1280, 720);
 
+	GameInput input = {};
+	GameButtonInput inputs[2];
+	GameButtonInput *newInput = &inputs[0];
+	GameButtonInput *oldInput = &inputs[1];
+
 	//Register window class
 	if (RegisterClass(&wnd))
 	{
@@ -437,7 +456,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 				DispatchMessage(&msg);
 			}
 
-			for (int i = 0; i < XUSER_MAX_COUNT; i++)
+			int maxControllerCount = XUSER_MAX_COUNT;
+			if (maxControllerCount > ARRAY_LENGTH(input.controllers))
+			{
+				maxControllerCount = ARRAY_LENGTH(input.controllers);
+			}
+			for (int i = 0; i < maxControllerCount; i++)
 			{
 				XINPUT_STATE controllerState;
 
@@ -448,13 +472,26 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 					XINPUT_GAMEPAD *gamepad = &(controllerState.Gamepad);
 
 					bool up = (gamepad->wButtons & XINPUT_GAMEPAD_DPAD_UP);
+					ProcessXInputDigitalButton(&newInput->up, &oldInput->up, gamepad->wButtons, XINPUT_GAMEPAD_DPAD_UP);
+
 					bool down = (gamepad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN);
+					ProcessXInputDigitalButton(&newInput->down, &oldInput->down, gamepad->wButtons, XINPUT_GAMEPAD_DPAD_DOWN);
+
 					bool left = (gamepad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT);
+					ProcessXInputDigitalButton(&newInput->left, &oldInput->left, gamepad->wButtons, XINPUT_GAMEPAD_DPAD_LEFT);
+
 					bool right = (gamepad->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT);
+					ProcessXInputDigitalButton(&newInput->right, &oldInput->right, gamepad->wButtons, XINPUT_GAMEPAD_DPAD_RIGHT);
+
+					bool leftShoulder = (gamepad->wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER);
+					ProcessXInputDigitalButton(&newInput->leftShoulder, &oldInput->leftShoulder, gamepad->wButtons, XINPUT_GAMEPAD_LEFT_SHOULDER);
+				
+					bool rightShoulder = (gamepad->wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER);
+					ProcessXInputDigitalButton(&newInput->rightShoulder, &oldInput->rightShoulder, gamepad->wButtons, XINPUT_GAMEPAD_RIGHT_SHOULDER);
+
 					bool start = (gamepad->wButtons & XINPUT_GAMEPAD_START);
 					bool back = (gamepad->wButtons & XINPUT_GAMEPAD_BACK);
-					bool leftShoulder = (gamepad->wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER);
-					bool rightShoulder = (gamepad->wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER);
+
 					bool AButton = (gamepad->wButtons & XINPUT_GAMEPAD_A);
 					bool BButton = (gamepad->wButtons & XINPUT_GAMEPAD_B);
 					bool XButton = (gamepad->wButtons & XINPUT_GAMEPAD_X);
@@ -462,6 +499,36 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 					INT16 StickX = gamepad->sThumbLX;
 					INT16 StickY = gamepad->sThumbLY;
+
+					newInput->isAnalog = true;
+					newInput->startX = oldInput->endX;
+					newInput->startY = oldInput->endY;
+
+					double X;
+					if (gamepad->sThumbLX < 0)
+					{
+						X = gamepad->sThumbLX / -32768;
+					}
+					else
+					{
+						X = gamepad->sThumbLX / 32767;
+					}
+
+					newInput->minX = newInput->maxX = newInput->endX = X;
+
+					double Y;
+					if (gamepad->sThumbLX < 0)
+					{
+						Y = gamepad->sThumbLY / -32768;
+					}
+					else
+					{
+						Y = gamepad->sThumbLY / 32767;
+					}
+
+					newInput->minY = newInput->maxY = newInput->endY = Y;
+
+					input.controllers[0] = *newInput;
 
 					XOffset += StickX >> 12;
 					YOffset += StickY >> 12;
@@ -506,7 +573,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 				gameOutputSoundBuffer.soundData = soundData;
 				gameOutputSoundBuffer.samples = samples;
 
-				GameUpdateAndRender((GameOffScreenBuffer *)&gOffBuffer, XOffset, YOffset, &gameOutputSoundBuffer);
+				GameUpdateAndRender((GameOffScreenBuffer *)&gOffBuffer, &gameOutputSoundBuffer, &input);
 
 				FillSoundBuffer(byteToLock, bytesToWrite, &gameOutputSoundBuffer);
 
@@ -536,6 +603,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 			
 			startCounter = endCounter;
 			startCycle = endCycle;
+
+			GSwap((void*)newInput, (void *)oldInput);
 		}
 	}
 

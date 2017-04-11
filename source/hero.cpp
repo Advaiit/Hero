@@ -49,8 +49,17 @@ static void renderGradient(GameOffScreenBuffer *buffer, int XOffset, int YOffset
 	}
 }
 
-void GameUpdateAndRender(GameOffScreenBuffer *gameBuffer, int xoffset, int yoffset, GameOutputSoundBuffer *soundBuffer)
+void GameUpdateAndRender(GameOffScreenBuffer *gameBuffer, GameOutputSoundBuffer *soundBuffer, GameInput *input)
 {
+	GameButtonInput *gameButtonInput = &input->controllers[0];
+	int xoffset = 0, yoffset = 0;
+
+	if (gameButtonInput->isAnalog)
+	{
+		xoffset += (int)4.0f * gameButtonInput->endX;
+		yoffset += (int)4.0f * gameButtonInput->endY;
+	}
+
 	renderGradient(gameBuffer, xoffset, yoffset);
 	GameOutputSound(soundBuffer);
 }

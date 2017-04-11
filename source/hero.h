@@ -11,6 +11,53 @@
 #define AUDIO_BUFFER_SIZE (AUDIO_SAMPLE_PER_SEC * BYTES_PER_SAMPLE)
 #define PI 3.14159265359
 
+#define ARRAY_LENGTH(arr) sizeof(arr)/sizeof((arr)[0]) 
+
+struct GameButtonState
+{
+	bool isHalfTransition;
+	bool endedDown;
+};
+
+struct GameButtonInput
+{
+	bool isAnalog;
+
+	float startX;
+	float startY;
+
+	float minX;
+	float minY;
+
+	float maxX;
+	float maxY;
+
+	float endX;
+	float endY;
+
+	union
+	{
+		GameButtonState buttons[6];
+		struct
+		{
+			GameButtonState up;
+			GameButtonState down;
+			GameButtonState right;
+			GameButtonState left;
+			GameButtonState rightShoulder;
+			GameButtonState leftShoulder;
+		};
+	};
+
+
+
+};
+
+struct GameInput
+{
+	GameButtonInput controllers[4];
+};
+
 struct	GameOffScreenBuffer
 {
 	BITMAPINFO bitmapInfo;
